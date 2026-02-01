@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
 
-const authMiddleware = require("../middleware/auth.middleware");
+const verifyToken = require("../middleware/verifyToken");
 const { getUserRole } = require("../controllers/auth.controller");
 
-router.get("/role", authMiddleware, getUserRole);
+router.get("/role", verifyToken, getUserRole);
 
 module.exports = router;

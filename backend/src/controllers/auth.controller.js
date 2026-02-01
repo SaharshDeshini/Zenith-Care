@@ -1,9 +1,8 @@
-const { db } = require("../config/firebase");
+import { db } from "../config/firebase.js";
 
-const getUserRole = async (req, res) => {
+export const getUserRole = async (req, res) => {
   try {
     const uid = req.user.uid;
-
     const userDoc = await db.collection("users").doc(uid).get();
 
     if (userDoc.exists && userDoc.data().role === "reception") {
@@ -11,9 +10,7 @@ const getUserRole = async (req, res) => {
     }
 
     return res.json({ role: "patient" });
-  } catch (error) {
+  } catch {
     return res.status(500).json({ message: "Failed to determine role" });
   }
 };
-
-module.exports = { getUserRole };
