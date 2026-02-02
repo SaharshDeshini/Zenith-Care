@@ -1,31 +1,35 @@
-import { db } from "../config/firebase.js";
-import { Timestamp } from "firebase-admin/firestore";
-import { getTodayDate } from "../utils/date.js";
+const { db } = require("../config/firebase");
+const { Timestamp } = require("firebase-admin/firestore");
+const { getTodayDate } = require("../utils/date");
+const { recalculateETAForQueue } = require("../utils/recalculateEta");
 
 /**
  * INIT QUEUE (Reception Only)
  */
-export const initQueue = async (req, res) => {
+const initQueue = async (req, res) => {
   try {
     const { doctorId } = req.body;
+
     // Fetch doctor to get hospitalId (SOURCE OF TRUTH)
-      const doctorDoc = await db
-        .collection("doctors")
-        .doc(doctorId)
-        .get();
+    const doctorDoc = await db
+      .collection("doctors")
+      .doc(doctorId)
+      .get();
 
-      if (!doctorDoc.exists) {
-        return res.status(404).json({ error: "Doctor not found" });
-      }
+    if (!doctorDoc.exists) {
+      return res.status(404).json({ error: "Doctor not found" });
+    }
 
-      const hospitalId = doctorDoc.data().hospitalId;
+    const hospitalId = doctorDoc.data().hospitalId;
 
-      if (!hospitalId) {
-        return res.status(400).json({ error: "Doctor has no hospitalId" });
-      }
+    if (!hospitalId) {
+      return res.status(400).json({ error: "Doctor has no hospitalId" });
+    }
+
     const today = getTodayDate();
 
-    const existing = await db.collection("queues")
+    const existing = await db
+      .collection("queues")
       .where("doctorId", "==", doctorId)
       .where("date", "==", today)
       .get();
@@ -40,15 +44,16 @@ export const initQueue = async (req, res) => {
       date: today,
       status: "active",
       currentIndex: 0,
+      delayMinutes: 0,
+      isOpen: true,
       createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now()
+      updatedAt: Timestamp.now(),
     });
 
     return res.status(201).json({
       message: "Queue initialized",
-      queueId: queueRef.id
+      queueId: queueRef.id,
     });
-
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -57,12 +62,12 @@ export const initQueue = async (req, res) => {
 /**
  * JOIN QUEUE (Patient / Reception)
  */
-export const joinQueue = async (req, res) => {
+const joinQueue = async (req, res) => {
   const { queueId, patientName } = req.body;
   const user = req.user;
 
   try {
-    // 🔹 FETCH ROLE FROM USERS COLLECTION (SOURCE OF TRUTH)
+    // Fetch role from users collection
     const userDoc = await db
       .collection("users")
       .doc(user.uid)
@@ -72,7 +77,7 @@ export const joinQueue = async (req, res) => {
       return res.status(400).json({ error: "User not found" });
     }
 
-    const role = userDoc.data().role; // "patient" | "reception"
+    const role = userDoc.data().role;
 
     const queueRef = db.collection("queues").doc(queueId);
     const appointmentsRef = db.collection("appointments");
@@ -102,7 +107,6 @@ export const joinQueue = async (req, res) => {
         doctorId: queueSnap.data().doctorId,
         hospitalId: queueSnap.data().hospitalId,
 
-        // ✅ FIXED HERE
         patientId: role === "patient" ? user.uid : null,
         patientName,
 
@@ -113,22 +117,23 @@ export const joinQueue = async (req, res) => {
         scheduledDate: queueSnap.data().date,
 
         createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now()
+        updatedAt: Timestamp.now(),
       });
     });
 
-    return res.status(201).json({ message: "Joined queue successfully" });
+    // ✅ ETA recalculated AFTER booking
+    await recalculateETAForQueue(queueId);
 
+    return res.status(201).json({ message: "Joined queue successfully" });
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
 };
 
-
 /**
- * QUEUE STATUS
+ * QUEUE STATUS (PATIENT VIEW)
  */
-export const getQueueStatus = async (req, res) => {
+const getQueueStatus = async (req, res) => {
   const { queueId } = req.params;
   const user = req.user;
 
@@ -137,24 +142,35 @@ export const getQueueStatus = async (req, res) => {
     if (!queueSnap.exists)
       return res.status(404).json({ error: "Queue not found" });
 
-    const appointmentsSnap = await db.collection("appointments")
+    const appointmentsSnap = await db
+      .collection("appointments")
       .where("queueId", "==", queueId)
       .orderBy("queueNumber")
       .get();
 
-    const appointments = appointmentsSnap.docs.map(d => d.data());
-    const myAppt = appointments.find(a => a.patientId === user.uid);
+    const appointments = appointmentsSnap.docs.map((d) => d.data());
+    const myAppt = appointments.find(
+      (a) => a.patientId === user.uid
+    );
 
     return res.json({
       status: queueSnap.data().status,
       currentServing: queueSnap.data().currentIndex,
       yourQueueNumber: myAppt?.queueNumber ?? null,
       peopleAhead: myAppt
-        ? myAppt.queueNumber - queueSnap.data().currentIndex - 1
-        : null
+        ? myAppt.queueNumber -
+          queueSnap.data().currentIndex -
+          1
+        : null,
+      eta: myAppt?.eta ?? null,
     });
-
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
+};
+
+module.exports = {
+  initQueue,
+  joinQueue,
+  getQueueStatus,
 };

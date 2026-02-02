@@ -1,8 +1,14 @@
 const admin = require("firebase-admin");
+const path = require("path");
+
+// 🔒 Absolute path to service account key
+const serviceAccount = require(
+  path.join(__dirname, "../../serviceAccountKey.json")
+);
 
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
+    credential: admin.credential.cert(serviceAccount),
   });
 }
 
