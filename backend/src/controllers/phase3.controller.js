@@ -9,7 +9,7 @@ const { recalculateETAForQueue } =
 const checkInPatient = async (req, res) => {
   const { appointmentId } = req.body;
 
-  // 1️⃣ Fetch appointment (SOURCE OF TRUTH)
+  // 1️⃣ Fetch appointment
   const apptRef = db.collection("appointments").doc(appointmentId);
   const apptSnap = await apptRef.get();
 
@@ -19,30 +19,53 @@ const checkInPatient = async (req, res) => {
 
   const { queueId } = apptSnap.data();
 
-  // 2️⃣ Update appointment
+  // 2️⃣ Fetch queue (for pause check)
+  const queueRef = db.collection("queues").doc(queueId);
+  const queueSnap = await queueRef.get();
+
+  if (!queueSnap.exists) {
+    return res.status(404).json({ error: "Queue not found" });
+  }
+
+  if (queueSnap.data().status === "paused") {
+    return res.status(400).json({
+      error: "Queue is paused. Cannot check-in.",
+    });
+  }
+
+  // 3️⃣ Update appointment
   await apptRef.update({
     status: "checked_in",
     checkedInAt: Timestamp.now(),
   });
 
-  // 3️⃣ Recalculate ETA using REAL queueId
+  // 4️⃣ Recalculate ETA
   await recalculateETAForQueue(queueId);
 
   res.json({ message: "Patient checked in" });
 };
 
-
 /**
  * SEND NEXT PATIENT
  */
 const sendNextPatient = async (req, res) => {
-  const { queueId } = req.body;
+  const { queueId } = req.params;
+
+  if (!queueId) {
+    return res.status(400).json({ error: "queueId is required" });
+  }
 
   const queueRef = db.collection("queues").doc(queueId);
   const queueSnap = await queueRef.get();
 
   if (!queueSnap.exists) {
     return res.status(404).json({ error: "Queue not found" });
+  }
+
+  if (queueSnap.data().status === "paused") {
+    return res.status(400).json({
+      error: "Queue is paused. Cannot advance.",
+    });
   }
 
   const { currentIndex } = queueSnap.data();
@@ -58,25 +81,26 @@ const sendNextPatient = async (req, res) => {
     ...d.data(),
   }));
 
-  // 1️⃣ Complete previous
+  // 1️⃣ Complete previous patient
   const previous = appointments.find(
     (a) => a.queueNumber === currentIndex
   );
-  if (previous) {
+
+  if (previous && previous.id) {
     await db.collection("appointments").doc(previous.id).update({
       status: "completed",
       completedAt: Timestamp.now(),
     });
   }
 
-  // 2️⃣ Auto-move missed booked patient to waiting
+  // 2️⃣ Auto-move missed patient to waiting
   const missed = appointments.find(
     (a) =>
       a.queueNumber === currentIndex + 1 &&
       a.status === "booked"
   );
 
-  if (missed) {
+  if (missed && missed.id) {
     await db.collection("appointments").doc(missed.id).update({
       status: "waiting",
     });
@@ -88,7 +112,7 @@ const sendNextPatient = async (req, res) => {
     updatedAt: Timestamp.now(),
   });
 
-  // 4️⃣ NOW recalculate ETA (correct moment)
+  // 4️⃣ Recalculate ETA
   await recalculateETAForQueue(queueId);
 
   res.json({ message: "Queue advanced" });
@@ -102,9 +126,9 @@ const addDelay = async (req, res) => {
 
   await db.collection("queues").doc(queueId).update({
     delayMinutes: minutes,
+    updatedAt: Timestamp.now(),
   });
 
-  // ✅ Delay affects ETA
   await recalculateETAForQueue(queueId);
 
   res.json({ message: "Delay updated" });
@@ -126,6 +150,7 @@ const endDay = async (req, res) => {
   apptSnap.docs.forEach((doc) => batch.delete(doc.ref));
 
   batch.update(db.collection("queues").doc(queueId), {
+    status: "closed",
     isOpen: false,
     closedAt: Timestamp.now(),
   });

@@ -6,6 +6,7 @@ const doctorRoutes = require("./routes/doctor.routes");
 const authRoutes = require("./routes/auth.routes");
 const queueRoutes = require("./routes/queue.routes");
 const phase3Routes = require ("./routes/phase3.routes.js");
+const phase4Routes = require("./routes/phase4.routes");
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use("/api/doctors", doctorRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/queues", queueRoutes);
 app.use("/api/phase3", phase3Routes);
+app.use("/api/phase4", phase4Routes);
 
 
 const PORT = 5000;

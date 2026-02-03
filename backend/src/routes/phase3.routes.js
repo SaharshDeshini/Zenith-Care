@@ -10,7 +10,7 @@ const {
 } = require("../controllers/phase3.controller");
 
 router.post("/check-in", verifyToken, checkInPatient);
-router.post("/send-next", verifyToken, sendNextPatient);
+router.post("/send-next/:queueId", verifyToken, sendNextPatient);
 router.post("/delay", verifyToken, addDelay);
 router.post("/end-day", verifyToken, endDay);
 

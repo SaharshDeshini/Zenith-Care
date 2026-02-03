@@ -76,6 +76,11 @@ const joinQueue = async (req, res) => {
     if (!userDoc.exists) {
       return res.status(400).json({ error: "User not found" });
     }
+    const queueSnap = await db.collection("queues").doc(queueId).get();
+
+    if (queueSnap.data().status !== "active") {
+      throw new Error("Queue is not accepting bookings");
+    }
 
     const role = userDoc.data().role;
 
