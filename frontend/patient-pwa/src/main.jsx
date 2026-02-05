@@ -1,10 +1,17 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./styles.css";
 
-createRoot(document.getElementById('root')).render(
+const params = new URLSearchParams(window.location.search);
+const tokenFromUrl = params.get("token");
+
+if (tokenFromUrl) {
+  localStorage.setItem("token", tokenFromUrl);
+}
+
+createRoot(document.getElementById("root")).render(
   <StrictMode>
     <App />
-  </StrictMode>,
-)
+  </StrictMode>
+);

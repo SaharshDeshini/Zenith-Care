@@ -18,6 +18,8 @@ function Login({ onBack }) {
   const checkRoleFromBackend = async () => {
     const token = await auth.currentUser.getIdToken();
 
+      localStorage.setItem("token", token);
+
     const res = await fetch("http://localhost:5000/api/auth/role", {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -29,13 +31,15 @@ function Login({ onBack }) {
   };
 
   // 🔹 Redirect based on role
-  const redirectUser = (role) => {
-    if (role === "reception") {
-      window.location.href = "http://localhost:5175";
-    } else {
-      window.location.href = "http://localhost:5174";
-    }
-  };
+  const redirectUser = async (role) => {
+  const token = await auth.currentUser.getIdToken();
+
+  if (role === "reception") {
+    window.location.href = `http://localhost:5175/?token=${token}`;
+  } else {
+    window.location.href = `http://localhost:5174/?token=${token}`;
+  }
+};
 
   // 🔹 Email + Password login (Reception)
   const handleEmailLogin = async () => {

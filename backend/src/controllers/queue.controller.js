@@ -63,11 +63,11 @@ const initQueue = async (req, res) => {
  * JOIN QUEUE (Patient / Reception)
  */
 const joinQueue = async (req, res) => {
-  const { queueId, patientName } = req.body;
+  const { queueId, doctorId, patientName } = req.body;
   const user = req.user;
 
   try {
-    // Fetch role from users collection
+    // 1️⃣ Fetch user role
     const userDoc = await db
       .collection("users")
       .doc(user.uid)
@@ -76,27 +76,57 @@ const joinQueue = async (req, res) => {
     if (!userDoc.exists) {
       return res.status(400).json({ error: "User not found" });
     }
-    const queueSnap = await db.collection("queues").doc(queueId).get();
-
-    if (queueSnap.data().status !== "active") {
-      throw new Error("Queue is not accepting bookings");
-    }
 
     const role = userDoc.data().role;
 
-    const queueRef = db.collection("queues").doc(queueId);
+    // 2️⃣ Resolve queueId (PATIENT FLOW)
+    let resolvedQueueId = queueId;
+
+    if (!resolvedQueueId && doctorId) {
+      const today = getTodayDate();
+
+      const queueSnap = await db
+        .collection("queues")
+        .where("doctorId", "==", doctorId)
+        .where("date", "==", today)
+        .where("isOpen", "==", true)
+        .limit(1)
+        .get();
+
+      if (queueSnap.empty) {
+        return res.status(400).json({
+          error: "Queue not started yet. Please wait.",
+        });
+      }
+
+      resolvedQueueId = queueSnap.docs[0].id;
+    }
+
+    if (!resolvedQueueId) {
+      return res.status(400).json({ error: "Invalid queue" });
+    }
+
+    // 3️⃣ Fetch queue
+    const queueRef = db.collection("queues").doc(resolvedQueueId);
+    const queueSnap = await queueRef.get();
+
+    if (!queueSnap.exists) {
+      return res.status(404).json({ error: "Queue not found" });
+    }
+
+    if (queueSnap.data().status !== "active") {
+      return res.status(400).json({
+        error: "Queue is not accepting bookings",
+      });
+    }
+
     const appointmentsRef = db.collection("appointments");
 
+    // 4️⃣ Transaction: assign queue number
     await db.runTransaction(async (tx) => {
-      const queueSnap = await tx.get(queueRef);
-      if (!queueSnap.exists) throw new Error("Queue not found");
-
-      if (queueSnap.data().status !== "active")
-        throw new Error("Queue not active");
-
       const lastSnap = await tx.get(
         appointmentsRef
-          .where("queueId", "==", queueId)
+          .where("queueId", "==", resolvedQueueId)
           .orderBy("queueNumber", "desc")
           .limit(1)
       );
@@ -108,7 +138,7 @@ const joinQueue = async (req, res) => {
       const appointmentRef = appointmentsRef.doc();
 
       tx.set(appointmentRef, {
-        queueId,
+        queueId: resolvedQueueId,
         doctorId: queueSnap.data().doctorId,
         hospitalId: queueSnap.data().hospitalId,
 
@@ -126,12 +156,22 @@ const joinQueue = async (req, res) => {
       });
     });
 
-    // ✅ ETA recalculated AFTER booking
-    await recalculateETAForQueue(queueId);
+    console.log("JOIN PAYLOAD", {
+      doctorId,
+      patientName,
+    });
 
-    return res.status(201).json({ message: "Joined queue successfully" });
+    // 5️⃣ Recalculate ETA
+    await recalculateETAForQueue(resolvedQueueId);
+
+    return res.status(201).json({
+      message: "Joined queue successfully",
+      queueId: resolvedQueueId, // 👈 IMPORTANT for patient app
+    });
+
   } catch (err) {
-    return res.status(400).json({ error: err.message });
+    console.error(err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -174,8 +214,44 @@ const getQueueStatus = async (req, res) => {
   }
 };
 
+const getTodayQueue = async (req, res) => {
+  try {
+    const { doctorId } = req.query;
+
+    if (!doctorId) {
+      return res.status(400).json({ error: "doctorId required" });
+    }
+
+    const today = getTodayDate();
+
+    const snap = await db
+      .collection("queues")
+      .where("doctorId", "==", doctorId)
+      .where("date", "==", today)
+      .where("isOpen", "==", true)
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      return res.status(404).json({ error: "Queue not started" });
+    }
+
+    const doc = snap.docs[0];
+
+    res.json({
+      queueId: doc.id,
+      status: doc.data().status,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
+
 module.exports = {
   initQueue,
   joinQueue,
   getQueueStatus,
+  getTodayQueue,
 };
